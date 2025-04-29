@@ -1,0 +1,57 @@
+name: Auto Release Kodama
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check for updates
+        id: check
+        run: |
+          LATEST_COMMIT=$(curl -s https://api.github.com/repos/kokic/kodama/commits/main | jq -r '.sha')
+          echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+          if [ -f .last_commit ]; then
+            LAST_COMMIT=$(cat .last_commit)
+            if [ "$LATEST_COMMIT" = "$LAST_COMMIT" ]; then
+              echo "No new commits"
+              exit 1
+            fi
+          fi
+          echo $LATEST_COMMIT > .last_commit
+
+      - name: Clone kodama upstream
+        run: |
+          git clone https://github.com/kokic/kodama.git kodama-upstream
+
+      - name: Build release
+        if: steps.check.outputs.latest_commit != ''
+        run: |
+          cd kodama-upstream
+          cargo build --release
+
+      - name: Create Release
+        if: steps.check.outputs.latest_commit != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            kodama-upstream/target/release/kodama
+          tag_name: kodama-${{ steps.check.outputs.latest_commit }}
+          name: Release kodama-${{ steps.check.outputs.latest_commit }}
+          body: |
+            Automated release based on latest commit from kokic/kodama
+            Commit: ${{ steps.check.outputs.latest_commit }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
